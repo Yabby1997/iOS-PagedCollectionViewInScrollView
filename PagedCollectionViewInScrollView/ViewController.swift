@@ -7,6 +7,7 @@
 
 import UIKit
 import SnapKit
+import Combine
 
 class CollectionViewCell: UICollectionViewCell {
     static let identifier: String = "CollectionViewCell"
@@ -15,8 +16,9 @@ class CollectionViewCell: UICollectionViewCell {
 class PageViewCell: UICollectionViewCell, UICollectionViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     static let identifier: String = "PageViewCell"
     
-    enum CellType {
-        case first, second
+    enum CellType: Int {
+        case first = 0
+        case second
     }
     
     private let collectionView: UICollectionView = {
@@ -29,6 +31,7 @@ class PageViewCell: UICollectionViewCell, UICollectionViewDelegate, UICollection
         view.showsVerticalScrollIndicator = false
         view.register(CollectionViewCell.self, forCellWithReuseIdentifier: CollectionViewCell.identifier)
         view.backgroundColor = .clear
+        view.isScrollEnabled = false
         return view
     }()
     
@@ -105,13 +108,30 @@ class ViewController: UIViewController, UICollectionViewDelegate, UICollectionVi
         view.backgroundColor = .yellow
         return view
     }()
+    
+    private(set) lazy var button: UIButton = {
+        let button = UIButton()
+        button.setTitle("hello", for: .normal)
+        button.addTarget(self, action: #selector(didTapButton), for: .touchUpInside)
+        return button
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
     }
     
+    @objc func didTapButton() {
+        pageView.isUserInteractionEnabled = false
+        pageView.scrollToItem(at: IndexPath(item: 1, section: 0), at: .centeredVertically, animated: true)
+        pageView.isUserInteractionEnabled = true
+        DispatchQueue.global().async {
+            print(self.pageView.frame)
+        }
+    }
+    
     private func setupViews() {
+        view.backgroundColor = .systemBackground
         pageView.delegate = self
         pageView.dataSource = self
         
@@ -132,6 +152,11 @@ class ViewController: UIViewController, UICollectionViewDelegate, UICollectionVi
             make.height.equalTo(500)
         }
         
+        someView.addSubview(button)
+        button.snp.makeConstraints { make in
+            make.center.equalToSuperview()
+        }
+        
         contentView.addSubview(pageView)
         pageView.snp.makeConstraints { make in
             make.top.equalTo(someView.snp.bottom)
@@ -141,21 +166,34 @@ class ViewController: UIViewController, UICollectionViewDelegate, UICollectionVi
         }
     }
     
+    private var humanPageHeight: CGFloat = 1200
+    private var demiHumanPageHeight: CGFloat = 900
+    
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        layoutPageView()
+        
+        $currentCell
+            .removeDuplicates()
+            .sink { [weak self] currentCellType in
+                guard let self = self else { return }
+                let pageHeight = currentCellType == .first ? self.humanPageHeight : self.demiHumanPageHeight
+                self.pageView.snp.updateConstraints { $0.height.equalTo(pageHeight) }
+                self.pageView.collectionViewLayout.invalidateLayout()
+                self.view.layoutIfNeeded()
+                self.pageView.reloadData()
+            }
+            .store(in: &cancellables)
     }
     
-    func layoutPageView() {
-        guard let visiblePage = pageView.visibleCells.first as? PageViewCell else { return }
-        let pageHeight = visiblePage.contentSize.height
-        pageView.snp.updateConstraints { $0.height.equalTo(pageHeight) }
-        pageView.layoutIfNeeded()
-        pageView.reloadData()
-    }
+    private var cancellables: Set<AnyCancellable> = []
     
-    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        layoutPageView()
+    @Published var currentCell: PageViewCell.CellType = .first
+    
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        let index = Int(round(scrollView.contentOffset.x / scrollView.frame.width))
+        guard let currentCell = PageViewCell.CellType(rawValue: index) else { return }
+        self.currentCell = currentCell
+        print(scrollView.isDragging)
     }
     
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
